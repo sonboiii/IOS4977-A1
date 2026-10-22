@@ -1,0 +1,64 @@
+@host = http://localhost:5080
+# @host = https://YOUR-APP.azurewebsites.net
+
+### Register
+POST {{host}}/api/auth/register
+Content-Type: application/json
+
+{
+  "name": "Test Voter",
+  "email": "test@example.com",
+  "password": "secret123"
+}
+
+### Login (copy the token into @token below)
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "demo@elections.ca",
+  "password": "Demo123!"
+}
+
+###
+@token = PASTE-TOKEN-HERE
+
+### Current user
+GET {{host}}/api/auth/me
+Authorization: Bearer {{token}}
+
+### Municipalities
+GET {{host}}/api/municipalities
+
+### Municipality 3 with its positions
+GET {{host}}/api/municipalities/3
+
+### Positions (optionally ?municipalityId=1)
+GET {{host}}/api/positions
+
+### Position 1
+GET {{host}}/api/positions/1
+
+### Candidates (optional filters: municipalityId, positionId, name)
+GET {{host}}/api/candidates?municipalityId=3
+
+### Candidate 1
+GET {{host}}/api/candidates/1
+
+### Search
+GET {{host}}/api/candidates/search?name=chen
+
+### My voting guide
+GET {{host}}/api/savedcandidates
+Authorization: Bearer {{token}}
+
+### Save a candidate
+POST {{host}}/api/savedcandidates
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "candidateId": 13 }
+
+### Remove by savedCandidateId
+DELETE {{host}}/api/savedcandidates/1
+Authorization: Bearer {{token}}
