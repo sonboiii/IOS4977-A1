@@ -51,11 +51,14 @@ final class APIClient {
                              query: [URLQueryItem],
                              body: (any Encodable)?,
                              authorized: Bool) throws -> URLRequest {
-        var components = URLComponents(url: baseURL.appendingPathComponent(path),
-                                       resolvingAgainstBaseURL: false)!
+        guard var components = URLComponents(url: baseURL.appendingPathComponent(path),
+                                             resolvingAgainstBaseURL: false) else {
+            throw APIError.invalidResponse
+        }
         if !query.isEmpty { components.queryItems = query }
 
-        var request = URLRequest(url: components.url!)
+        guard let url = components.url else { throw APIError.invalidResponse }
+        var request = URLRequest(url: url)
         request.httpMethod = method
         request.timeoutInterval = 30
         request.setValue("application/json", forHTTPHeaderField: "Accept")
