@@ -58,7 +58,7 @@ public class MunicipalitiesController(AppDbContext db) : ControllerBase
                         Name = p.Name,
                         SeatsAvailable = p.SeatsAvailable,
                         MunicipalityId = p.MunicipalityId,
-                        MunicipalityName = m.Name,
+                        MunicipalityName = p.Municipality!.Name,
                         CandidateCount = p.Candidates.Count
                     })
                     .ToList()
