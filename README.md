@@ -114,7 +114,7 @@ Then in the portal: **Settings → Environment variables** → add `Jwt__Key` wi
 In the portal, open the Web App → **Deployment Center** → Source: GitHub → pick the repo/branch. Azure commits a workflow file that builds and deploys on every push. Add `Jwt__Key` as above.
 
 ### Verify
-- `https://<unique-app-name>.azurewebsites.net/swagger` loads.
+- `https://municipal-elections-a1-fgdtgnewg7cedkd7.westus3-01.azurewebsites.net/swagger/index.html` loads.
 - `GET /api/municipalities` returns 3 items.
 - Take the "Azure deployment screenshot" of the Web App overview page + Swagger.
 
@@ -128,5 +128,5 @@ In the portal, open the Web App → **Deployment Center** → Source: GitHub →
 | `DemoUser:*` | Demo account (blank email disables) | `DemoUser__Email` |
 
 ## Deliverable URLs
-- Azure API URL: `https://<unique-app-name>.azurewebsites.net`
-- GitHub repository: `https://github.com/<you>/<repo>`
+- Azure API URL: `https://municipal-elections-a1-fgdtgnewg7cedkd7.westus3-01.azurewebsites.net/`
+- GitHub repository: `https://github.com/sonboiii/IOS4977-A1`
