@@ -55,11 +55,12 @@ Remove the `DemoUser` section in `appsettings.json` to disable it.
 | GET | `/api/auth/me` | Bearer | Current user `{ id, name, email }` (Profile screen) |
 | GET | `/api/municipalities` | — | List with `candidateCount` |
 | GET | `/api/municipalities/{id}` | — | Includes `positions` |
-| GET | `/api/positions` | — | Optional `?municipalityId=` |
+| GET | `/api/positions` (alias `/api/offices`) | — | Optional `?city=` or `?municipalityId=` |
 | GET | `/api/positions/{id}` | — | |
-| GET | `/api/candidates` | — | Optional `?municipalityId=&positionId=&name=` (for app filtering) |
-| GET | `/api/candidates/{id}` | — | |
-| GET | `/api/candidates/search?name=` | — | Partial, case-insensitive name match |
+| GET | `/api/candidates` | — | Optional `?city=&municipalityId=&positionId=&name=` (for app filtering) |
+| GET | `/api/candidates/{id}` | — | Optional `?city=`: 404 if the candidate is in another municipality |
+| GET | `/api/candidates/search?name=` | — | Partial, case-insensitive name match; optional `?city=` |
+| GET | `/api/elections` | — | Assignment 2: election date + offices/seats per municipality; optional `?city=` |
 | GET | `/api/savedcandidates` | Bearer | Current user's voting guide (each item embeds the candidate) |
 | POST | `/api/savedcandidates` | Bearer | Body `{ candidateId }` → **201**; **404** unknown candidate; **409** already saved |
 | DELETE | `/api/savedcandidates/{id}` | Bearer | `id` = `savedCandidateId` → **204** |
@@ -74,6 +75,18 @@ Remove the `DemoUser` section in `appsettings.json` to disable it.
 
 ### Password rules
 Minimum 6 characters (no other complexity requirements), unique email. Match this in the app's validation.
+
+### Assignment 2: municipality filtering (`?city=`)
+`city` is the municipality name (case-insensitive), e.g. `Burnaby`, `Maple Ridge`, `Pitt Meadows`.
+When it is given, only that municipality's records are returned; an unknown city returns **404**.
+
+```
+GET /api/candidates?city=Burnaby
+GET /api/offices?city=Burnaby
+GET /api/elections?city=Burnaby
+```
+
+Candidate selections for Assignment 2 are stored in Firebase Firestore by the iOS app; the API stays on SQLite.
 
 ## Database (ERD summary)
 
