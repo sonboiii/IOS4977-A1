@@ -16,8 +16,8 @@ struct Municipality: Codable, Identifiable, Hashable {
     var formattedElectionDate: String { DateParsing.displayDate(fromDay: electionDate) }
 }
 
-/// GET /api/municipalities/{id}
-struct MunicipalityDetail: Codable {
+/// GET /api/elections?city= (and /api/municipalities/{id})
+struct MunicipalityDetail: Codable, Equatable {
     let municipalityId: Int
     let name: String
     let province: String
@@ -31,7 +31,7 @@ struct MunicipalityDetail: Codable {
     var formattedElectionDate: String { DateParsing.displayDate(fromDay: electionDate) }
 }
 
-/// GET /api/positions
+/// GET /api/offices?city= (alias of /api/positions)
 struct Position: Codable, Identifiable, Hashable {
     let positionId: Int
     let name: String
@@ -72,22 +72,6 @@ struct Candidate: Codable, Identifiable, Hashable {
         guard let email, !email.isEmpty else { return nil }
         return URL(string: "mailto:\(email)")
     }
-}
-
-/// GET /api/savedcandidates
-struct SavedCandidate: Codable, Identifiable, Hashable {
-    let savedCandidateId: Int
-    let candidateId: Int
-    /// ISO-8601 UTC timestamp.
-    let dateSaved: String
-    let candidate: Candidate
-
-    var id: Int { savedCandidateId }
-    var savedDate: Date? { DateParsing.date(fromISO: dateSaved) }
-}
-
-struct SaveCandidateRequest: Encodable {
-    let candidateId: Int
 }
 
 /// RFC 7807 problem details returned by the API on errors.

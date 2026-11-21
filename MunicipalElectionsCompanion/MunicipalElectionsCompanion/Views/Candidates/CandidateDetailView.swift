@@ -1,31 +1,83 @@
 import SwiftUI
 
-/// Screen 5: biography, photo, website and email, with an Add to Voting Guide button.
-/// Data: GET /api/candidates/{id}; button: POST /api/savedcandidates (or DELETE to remove).
+/// Candidate Details: API data (GET /api/candidates/{id}?city=) plus the user's Firestore
+/// selection with Add / Edit / Delete Selection buttons.
+///
+/// Adaptive: photo and information side by side when there's room (iPad, iPhone landscape),
+/// stacked vertically on narrow screens (iPhone portrait).
 struct CandidateDetailView: View {
-    @Environment(VotingGuideViewModel.self) private var votingGuide
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(MunicipalityViewModel.self) private var municipality
+    @Environment(CandidateSelectionsViewModel.self) private var selections
     @State private var viewModel: CandidateDetailViewModel
+
+    // Presentation state lives on this view (outside the size-dependent layout),
+    // so an open editor or dialog survives rotation.
+    @State private var editorViewModel: SelectionEditorViewModel?
+    @State private var confirmingDelete = false
 
     init(candidate: Candidate) {
         _viewModel = State(initialValue: CandidateDetailViewModel(candidate: candidate))
     }
 
     private var candidate: Candidate { viewModel.candidate }
+    private var selection: CandidateSelection? { selections.selection(for: candidate.candidateId) }
+    private var isSideBySide: Bool { horizontalSizeClass == .regular || verticalSizeClass == .compact }
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 24) {
-                header
-                guideButton
-                contactSection
-                biographySection
+            Group {
+                if viewModel.isUnavailable {
+                    ContentUnavailableView("Not in Your Municipality",
+                                           systemImage: "building.2",
+                                           description: Text("This candidate isn't running in \(municipality.city ?? "your municipality")."))
+                } else if isSideBySide {
+                    HStack(alignment: .top, spacing: 24) {
+                        header
+                            .frame(width: 260)
+                            .padding()
+                            .background(Color(.secondarySystemGroupedBackground),
+                                        in: RoundedRectangle(cornerRadius: 16))
+                        VStack(spacing: 20) {
+                            selectionSection
+                            contactSection
+                            biographySection
+                        }
+                    }
+                } else {
+                    VStack(spacing: 20) {
+                        header
+                        selectionSection
+                        contactSection
+                        biographySection
+                    }
+                }
             }
             .padding()
+            .frame(maxWidth: 1000)
+            .frame(maxWidth: .infinity)
         }
         .background(Color(.systemGroupedBackground))
         .navigationTitle(candidate.name)
         .navigationBarTitleDisplayMode(.inline)
-        .task { await viewModel.refresh() }
+        .task(id: municipality.city) {
+            if let city = municipality.city { await viewModel.refresh(city: city) }
+        }
+        .sheet(item: $editorViewModel) { editor in
+            SelectionEditorView(viewModel: editor)
+        }
+        .confirmationDialog("Delete this selection?",
+                            isPresented: $confirmingDelete,
+                            titleVisibility: .visible) {
+            Button("Delete Selection", role: .destructive) {
+                if let selection {
+                    Task { await selections.delete(selection) }
+                }
+            }
+        } message: {
+            Text("\(candidate.name) will be removed from My Candidate Selections.")
+        }
     }
 
     private var header: some View {
@@ -42,48 +94,83 @@ struct CandidateDetailView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity)
         .padding(.top, 8)
     }
 
+    // MARK: Selection (Firestore)
+
     @ViewBuilder
-    private var guideButton: some View {
-        let isSaved = votingGuide.isSaved(candidate.candidateId)
-        let isPending = votingGuide.isPending(candidate.candidateId)
+    private var selectionSection: some View {
+        let isPending = selections.isPending(candidate.candidateId)
 
-        Button {
-            Task {
-                if isSaved {
-                    await votingGuide.remove(candidateId: candidate.candidateId)
-                } else {
-                    await votingGuide.add(candidate)
-                }
-            }
-        } label: {
-            HStack {
-                if isPending {
-                    ProgressView()
-                } else {
-                    Image(systemName: isSaved ? "checkmark.circle.fill" : "plus.circle.fill")
-                }
-                Text(isSaved ? "In Your Voting Guide" : "Add to Voting Guide")
-                    .fontWeight(.semibold)
-            }
-            .frame(maxWidth: .infinity, minHeight: 28)
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(isSaved ? Color.green : Color.accentColor)
-        .controlSize(.large)
-        .disabled(isPending)
-        .accessibilityHint(isSaved ? "Removes this candidate from your voting guide" : "")
-        .animation(.default, value: isSaved)
+        if let selection {
+            DetailCard(title: "Your Selection") {
+                Label("Saved \(selection.dateCreated.formatted(date: .abbreviated, time: .shortened))",
+                      systemImage: "checkmark.seal.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(.green)
+                Text(selection.notes.isEmpty ? "No notes." : selection.notes)
+                    .foregroundStyle(selection.notes.isEmpty ? Color.secondary : Color.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-        if isSaved {
-            Text("Tap again to remove from your guide.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.top, -16)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) { editButton; deleteButton }
+                    VStack(spacing: 10) { editButton; deleteButton }
+                }
+                .disabled(isPending)
+            }
+        } else {
+            Button {
+                editorViewModel = SelectionEditorViewModel(candidate: candidate, existing: nil)
+            } label: {
+                HStack {
+                    if isPending {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "plus.circle.fill")
+                    }
+                    Text("Add Selection")
+                        .fontWeight(.semibold)
+                }
+                .frame(maxWidth: .infinity, minHeight: 28)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(isPending || selections.state != .loaded)
+
+            if let seats = selections.seats(forPositionId: candidate.positionId) {
+                Text("You've chosen \(selections.selectedCount(forPositionId: candidate.positionId)) of \(seats) for \(candidate.positionName).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, -12)
+            }
         }
     }
+
+    private var editButton: some View {
+        Button {
+            editorViewModel = SelectionEditorViewModel(candidate: candidate, existing: selection)
+        } label: {
+            Label("Edit Selection", systemImage: "pencil")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+    }
+
+    private var deleteButton: some View {
+        Button(role: .destructive) {
+            confirmingDelete = true
+        } label: {
+            Label("Delete Selection", systemImage: "trash")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+    }
+
+    // MARK: API data
 
     @ViewBuilder
     private var contactSection: some View {
@@ -108,15 +195,20 @@ struct CandidateDetailView: View {
 
     private var biographySection: some View {
         DetailCard(title: "Biography") {
-            let hasBio = candidate.biography?.isEmpty == false
-            Text(hasBio ? (candidate.biography ?? "") : "This candidate hasn't provided a biography yet.")
-                .foregroundStyle(hasBio ? Color.primary : Color.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if viewModel.isRefreshing && candidate.biography == nil {
+                ProgressView()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                let hasBio = candidate.biography?.isEmpty == false
+                Text(hasBio ? (candidate.biography ?? "") : "This candidate hasn't provided a biography yet.")
+                    .foregroundStyle(hasBio ? Color.primary : Color.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
     }
 }
 
-private struct DetailCard<Content: View>: View {
+struct DetailCard<Content: View>: View {
     let title: String
     @ViewBuilder let content: Content
 

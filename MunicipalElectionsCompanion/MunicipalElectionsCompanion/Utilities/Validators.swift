@@ -20,4 +20,11 @@ enum Validators {
             ? "Password must be at least \(AppConfig.minimumPasswordLength) characters."
             : nil
     }
+
+    /// Candidate selection notes: optional, at most 500 characters.
+    static func notes(_ value: String) -> String? {
+        value.count > CandidateSelection.maxNotesLength
+            ? "Notes can't be longer than \(CandidateSelection.maxNotesLength) characters."
+            : nil
+    }
 }

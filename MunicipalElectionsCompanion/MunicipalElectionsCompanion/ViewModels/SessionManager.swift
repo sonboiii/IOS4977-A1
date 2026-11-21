@@ -1,7 +1,8 @@
 import Foundation
 import Observation
 
-/// Owns the authentication state for the whole app (JWT + signed-in user).
+/// Owns the authentication state for the whole app: the API's JWT (in the Keychain)
+/// plus the matching Firebase Auth session used by Firestore.
 @MainActor
 @Observable
 final class SessionManager {
@@ -11,18 +12,30 @@ final class SessionManager {
 
     var isAuthenticated: Bool { user != nil }
 
+    /// The email used as the user identifier in Firestore (lower-cased).
+    var userEmail: String? { user?.email.lowercased() }
+
     private let tokenStore: TokenStore
-    private let service: any ElectionServicing
+    private let authService: any AuthServicing
+    private let firebaseAuth: any FirebaseAuthServicing
     @ObservationIgnored private var expiryObserver: NSObjectProtocol?
 
-    init(tokenStore: TokenStore = .shared, service: any ElectionServicing = ElectionService.shared) {
+    init(tokenStore: TokenStore = .shared,
+         authService: any AuthServicing = AuthService.shared,
+         firebaseAuth: any FirebaseAuthServicing = FirebaseAuthService.shared) {
         self.tokenStore = tokenStore
-        self.service = service
+        self.authService = authService
+        self.firebaseAuth = firebaseAuth
 
-        // Restore a previous session if its token is still valid.
+        // Restore a previous session if the JWT is still valid and Firebase is signed in as the same user.
         if let stored = tokenStore.session {
             if stored.isExpired {
                 tokenStore.clear()
+                firebaseAuth.signOut()
+            } else if firebaseAuth.currentEmail != stored.user.email.lowercased() {
+                tokenStore.clear()
+                firebaseAuth.signOut()
+                signOutMessage = "Please sign in again to sync your candidate selections."
             } else {
                 user = stored.user
             }
@@ -38,8 +51,10 @@ final class SessionManager {
         }
     }
 
-    /// Persists the JWT returned by login/register and switches the app to the signed-in state.
-    func signIn(with response: AuthResponse) {
+    /// Signs in to Firebase with the same credentials, then persists the JWT returned by
+    /// login/register and switches the app to the signed-in state.
+    func signIn(with response: AuthResponse, password: String) async throws {
+        try await firebaseAuth.signIn(email: response.user.email, password: password)
         tokenStore.save(StoredSession(token: response.token,
                                       expiresAt: response.expiresAt,
                                       user: response.user))
@@ -49,6 +64,7 @@ final class SessionManager {
 
     func signOut(message: String? = nil) {
         tokenStore.clear()
+        firebaseAuth.signOut()
         signOutMessage = message
         user = nil
     }
@@ -57,7 +73,7 @@ final class SessionManager {
     func refreshUser() async {
         guard isAuthenticated, let stored = tokenStore.session else { return }
         do {
-            let fresh = try await service.currentUser()
+            let fresh = try await authService.currentUser()
             tokenStore.save(StoredSession(token: stored.token, expiresAt: stored.expiresAt, user: fresh))
             user = fresh
         } catch {

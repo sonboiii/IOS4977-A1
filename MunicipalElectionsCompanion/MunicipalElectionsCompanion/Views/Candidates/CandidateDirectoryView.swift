@@ -1,63 +1,82 @@
 import SwiftUI
 
-/// Screen 4: candidate photo, name, position and municipality, with search and filtering.
-/// Data: GET /api/candidates (and /api/candidates/search?name= while searching).
+/// Candidate Directory for the configured municipality, with search and an office filter.
+/// Data: GET /api/candidates?city= (and /api/candidates/search?name=&city= while searching).
+///
+/// Adaptive layout, chosen from the available width:
+/// - iPhone portrait (narrow): single-column scrolling list.
+/// - iPhone landscape: two columns, with a biography excerpt and website on each card.
+/// - iPad portrait / landscape: a multi-column grid that adds columns as space grows.
 struct CandidateDirectoryView: View {
-    @State private var viewModel = CandidateDirectoryViewModel()
+    @Environment(MunicipalityViewModel.self) private var municipality
+    @Bindable var viewModel: CandidateDirectoryViewModel
+
+    private var city: String { municipality.city ?? "" }
 
     var body: some View {
-        content
-            .navigationTitle("Candidates")
-            .searchable(text: $viewModel.searchText,
-                        placement: .navigationBarDrawer(displayMode: .always),
-                        prompt: "Search by name")
-            .toolbar { filterMenu }
-            .safeAreaInset(edge: .top, spacing: 0) { activeFilterBar }
-            .task {
-                await viewModel.loadFilterOptions()
-            }
-            .task(id: viewModel.searchText) {
-                // Runs on appear and after each keystroke (debounced); the previous task is cancelled.
-                if viewModel.candidates.isEmpty && viewModel.trimmedSearch.isEmpty {
-                    await viewModel.loadCandidates()
-                } else {
-                    await viewModel.searchTextChanged()
-                }
-            }
-            .refreshable { await viewModel.loadCandidates() }
+        GeometryReader { proxy in
+            content(layout: DirectoryLayout(width: proxy.size.width))
+        }
+        .navigationTitle("\(city) Candidates")
+        .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $viewModel.searchText, prompt: "Search \(city) candidates")
+        .toolbar { filterMenu }
+        .safeAreaInset(edge: .top, spacing: 0) { activeFilterBar }
+        .task(id: city) {
+            await viewModel.loadCandidates(city: city)
+        }
+        .onChange(of: viewModel.searchText) {
+            searchTask?.cancel()
+            searchTask = Task { await viewModel.searchTextChanged(city: city) }
+        }
     }
 
+    @State private var searchTask: Task<Void, Never>?
+
     @ViewBuilder
-    private var content: some View {
+    private func content(layout: DirectoryLayout) -> some View {
         switch viewModel.state {
         case .idle, .loading where viewModel.candidates.isEmpty:
-            LoadingStateView(message: "Loading candidates…")
+            LoadingStateView(message: "Loading \(city) candidates…")
         case .failed(let message) where viewModel.candidates.isEmpty:
-            ErrorStateView(message: message) { await viewModel.loadCandidates() }
+            ErrorStateView(message: message) { await viewModel.loadCandidates(city: city) }
         default:
             let results = viewModel.filteredCandidates
             if results.isEmpty {
-                if !viewModel.trimmedSearch.isEmpty {
-                    ContentUnavailableView.search(text: viewModel.trimmedSearch)
-                } else {
-                    ContentUnavailableView {
-                        Label("No Candidates", systemImage: "person.3")
-                    } description: {
-                        Text("No candidates match these filters.")
-                    } actions: {
-                        if viewModel.hasActiveFilters {
-                            Button("Clear Filters") { viewModel.clearFilters() }
+                emptyState
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: layout.gridItems, spacing: 12) {
+                        ForEach(results) { candidate in
+                            NavigationLink(value: candidate) {
+                                CandidateCard(candidate: candidate, detailed: layout.showsDetails)
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
+                    .padding(.horizontal, layout.horizontalPadding)
+                    .padding(.vertical, 12)
+                    .animation(.default, value: results)
                 }
-            } else {
-                List(results) { candidate in
-                    NavigationLink(value: candidate) {
-                        CandidateRow(candidate: candidate)
-                    }
+                .background(Color(.systemGroupedBackground))
+                .refreshable { await viewModel.loadCandidates(city: city) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var emptyState: some View {
+        if !viewModel.trimmedSearch.isEmpty {
+            ContentUnavailableView.search(text: viewModel.trimmedSearch)
+        } else {
+            ContentUnavailableView {
+                Label("No Candidates", systemImage: "person.3")
+            } description: {
+                Text("No \(city) candidates match these filters.")
+            } actions: {
+                if viewModel.hasActiveFilters {
+                    Button("Clear Filters") { viewModel.clearFilters() }
                 }
-                .listStyle(.plain)
-                .animation(.default, value: results)
             }
         }
     }
@@ -65,28 +84,13 @@ struct CandidateDirectoryView: View {
     private var filterMenu: some ToolbarContent {
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
-                Picker("Municipality", selection: $viewModel.selectedMunicipalityId) {
-                    Text("All municipalities").tag(Int?.none)
-                    ForEach(viewModel.municipalities) { municipality in
-                        Text(municipality.name).tag(Int?.some(municipality.municipalityId))
-                    }
-                }
-                .pickerStyle(.menu)
-
-                Picker("Position", selection: $viewModel.selectedPositionName) {
-                    Text("All positions").tag(String?.none)
+                Picker("Office", selection: $viewModel.selectedPositionName) {
+                    Text("All offices").tag(String?.none)
                     ForEach(viewModel.positionNames, id: \.self) { name in
                         Text(name).tag(String?.some(name))
                     }
                 }
-                .pickerStyle(.menu)
-
-                if viewModel.hasActiveFilters {
-                    Divider()
-                    Button("Clear Filters", systemImage: "xmark.circle", role: .destructive) {
-                        viewModel.clearFilters()
-                    }
-                }
+                .pickerStyle(.inline)
             } label: {
                 Label("Filter",
                       systemImage: viewModel.hasActiveFilters
@@ -96,27 +100,40 @@ struct CandidateDirectoryView: View {
         }
     }
 
-    /// Chips showing the active filters, tappable to remove.
+    /// Chip showing the active office filter, tappable to remove.
     @ViewBuilder
     private var activeFilterBar: some View {
-        if viewModel.hasActiveFilters {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    if let name = viewModel.selectedMunicipalityName {
-                        FilterChip(title: name) { viewModel.selectedMunicipalityId = nil }
-                    }
-                    if let position = viewModel.selectedPositionName {
-                        FilterChip(title: position) { viewModel.selectedPositionName = nil }
-                    }
-                    Text("\(viewModel.filteredCandidates.count) results")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal)
-                .padding(.vertical, 8)
+        if let position = viewModel.selectedPositionName {
+            HStack(spacing: 8) {
+                FilterChip(title: position) { viewModel.selectedPositionName = nil }
+                Text("\(viewModel.filteredCandidates.count) results")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
             }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
             .background(.bar)
         }
+    }
+}
+
+/// Column count and card style for the available width.
+struct DirectoryLayout {
+    let width: CGFloat
+
+    /// One column on narrow screens (iPhone portrait), then one per ~280pt.
+    var columns: Int {
+        width < 500 ? 1 : max(2, Int(width / 280))
+    }
+
+    /// Wider layouts have room for a biography excerpt and website.
+    var showsDetails: Bool { columns > 1 }
+
+    var horizontalPadding: CGFloat { columns == 1 ? 12 : 20 }
+
+    var gridItems: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: columns)
     }
 }
 

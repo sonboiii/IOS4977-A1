@@ -15,9 +15,9 @@ final class LoginViewModel {
     /// Field errors appear only after the first submit attempt, then update live.
     private var hasAttemptedSubmit = false
 
-    private let service: any ElectionServicing
+    private let service: any AuthServicing
 
-    init(service: any ElectionServicing = ElectionService.shared) {
+    init(service: any AuthServicing = AuthService.shared) {
         self.service = service
     }
 
@@ -47,10 +47,13 @@ final class LoginViewModel {
             let response = try await service.login(
                 email: email.trimmingCharacters(in: .whitespacesAndNewlines),
                 password: password)
+            // Also signs in to Firebase (needed for Firestore) before the app switches screens.
+            try await session.signIn(with: response, password: password)
             password = ""
-            session.signIn(with: response)
-        } catch {
+        } catch let error as APIError {
             errorMessage = error.localizedDescription
+        } catch {
+            errorMessage = FirebaseServiceError.userMessage(for: error)
         }
     }
 }
@@ -72,9 +75,9 @@ final class RegisterViewModel {
 
     private var hasAttemptedSubmit = false
 
-    private let service: any ElectionServicing
+    private let service: any AuthServicing
 
-    init(service: any ElectionServicing = ElectionService.shared) {
+    init(service: any AuthServicing = AuthService.shared) {
         self.service = service
     }
 
@@ -107,10 +110,13 @@ final class RegisterViewModel {
                 name: name.trimmingCharacters(in: .whitespacesAndNewlines),
                 email: email.trimmingCharacters(in: .whitespacesAndNewlines),
                 password: password)
-            // The API returns a JWT on registration, so the user is signed in straight away.
-            session.signIn(with: response)
-        } catch {
+            // The API returns a JWT on registration, so the user is signed in straight away
+            // (this also creates the matching Firebase account).
+            try await session.signIn(with: response, password: password)
+        } catch let error as APIError {
             errorMessage = error.localizedDescription
+        } catch {
+            errorMessage = FirebaseServiceError.userMessage(for: error)
         }
     }
 }
